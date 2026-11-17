@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ca">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Laberint · Evolució</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{--bg:#1a1410;--card:#261d16;--line:#3a2d22;--txt:#f3e6d0;--mut:#b9a68a;--acc:#e0a458;--ok:#2ecc71;--bad:#e74c3c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,sans-serif}
+  main{max-width:1100px;margin:0 auto;padding:24px 16px 48px}
+  h1{font-size:1.7rem;margin:0}
+  .sub{color:var(--mut);margin:4px 0 22px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .kpi .v{font-size:2.1rem;font-weight:700}
+  .kpi .l{color:var(--mut);font-size:.9rem}
+  .kpi .d{font-size:.85rem;margin-top:4px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr));gap:12px}
+  h2{font-size:1rem;margin:0 0 10px;color:var(--mut);font-weight:600}
+  #resum{font-size:1.05rem;line-height:1.6;white-space:pre-wrap}
+  #resum-data{color:var(--mut);font-size:.85rem;margin-top:8px}
+  table{width:100%;border-collapse:collapse;font-size:.95rem}
+  td,th{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left}
+  th{color:var(--mut);font-weight:600}
+  .ok{color:var(--ok)} .bad{color:var(--bad)}
+  .err{color:var(--bad)}
+  .obj{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:18px}
+  .obj .t{display:flex;justify-content:space-between;font-size:.95rem;margin-bottom:6px}
+  .obj .t b{font-size:1.05rem}
+  .barra{height:12px;background:var(--line);border-radius:6px;overflow:hidden}
+  .barra i{display:block;height:100%;width:0;background:var(--acc);border-radius:6px;transition:width .8s}
+  .barra i.fet{background:var(--ok)}
+  .obj .n{color:var(--mut);font-size:.85rem;margin-top:6px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Entrenador AtomS3R · Laberint</h1>
+  <div class="sub">Evolució de les partides guardades a Firebase</div>
+
+  <div class="kpis">
+    <div class="card kpi"><div class="v" id="k-part">–</div><div class="l">partides (7 dies)</div><div class="d" id="d-part"></div></div>
+    <div class="card kpi"><div class="v" id="k-temps">–</div><div class="l">temps mitjà (s)</div><div class="d" id="d-temps"></div></div>
+    <div class="card kpi"><div class="v" id="k-millor">–</div><div class="l">millor temps (s)</div></div>
+    <div class="card kpi"><div class="v" id="k-caig">–</div><div class="l">caigudes per partida</div><div class="d" id="d-caig"></div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <h2>Objectius d'aquesta setmana</h2>
+    <div class="obj">
+      <div><div class="t"><span>Partides</span><b id="o-part">–</b></div><div class="barra"><i id="b-part"></i></div><div class="n" id="n-part"></div></div>
+      <div><div class="t"><span>Dies actius</span><b id="o-dies">–</b></div><div class="barra"><i id="b-dies"></i></div><div class="n" id="n-dies"></div></div>
+      <div><div class="t"><span>Partides per sota de l'objectiu de temps</span><b id="o-temps">–</b></div><div class="barra"><i id="b-temps"></i></div><div class="n" id="n-temps"></div></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <h2>Resum setmanal (IA)</h2>
+    <div id="resum">Encara no hi ha cap resum. Executa <code>python resum_setmanal.py</code>.</div>
+    <div id="resum-data"></div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><h2>Partides per dia</h2><canvas id="g-dies"></canvas></div>
+    <div class="card"><h2>Temps per partida completada (s) · verd = objectiu aconseguit</h2><canvas id="g-temps"></canvas></div>
+    <div class="card"><h2>Caigudes per partida</h2><canvas id="g-caig"></canvas></div>
+    <div class="card"><h2>Últimes partides</h2><table id="taula"></table></div>
+  </div>
+</main>
+
+<script>
+const FIREBASE_URL = "https://EL-TEU-PROJECTE-default-rtdb.europe-west1.firebasedatabase.app";
+
+const OBJ_PARTIDES = 10;
+const OBJ_DIES = 5;
+const OBJ_TEMPS = 60;
+const OBJ_CAIGUDES = 1;
+
+Chart.defaults.color = '#b9a68a';
+Chart.defaults.borderColor = '#3a2d22';
+const ACC = '#e0a458';
+const liniaObjectiu = (n, valor) => ({label:'Objectiu', data:Array(n).fill(valor), borderColor:'#2ecc71',
+  borderDash:[6,6], borderWidth:2, pointRadius:0, fill:false});
+function objectiu(id, valor, meta, nota){
+  const pct = Math.min(100, Math.round(valor / meta * 100));
+  $('o-'+id).textContent = valor + ' / ' + meta;
+  $('b-'+id).style.width = pct + '%';
+  $('b-'+id).className = pct >= 100 ? 'fet' : '';
+  $('n-'+id).textContent = pct >= 100 ? 'Objectiu aconseguit!' : nota;
+}
+const $ = id => document.getElementById(id);
+const dia = t => new Date(t).toLocaleDateString('ca-ES', {day:'numeric', month:'short'});
+const mitja = a => a.length ? a.reduce((s,x)=>s+x,0)/a.length : null;
+
+function estad(llista){
+  const comp = llista.filter(p => p.completat);
+  return { n: llista.length,
+           temps: mitja(comp.map(p => p.temps_s)),
+           millor: comp.length ? Math.min(...comp.map(p => p.temps_s)) : null,
+           caig: mitja(llista.map(p => p.caigudes)) };
+}
+function delta(el, ara, abans, menysEsMillor){
+  if (ara == null || abans == null || abans === 0) { el.textContent = ''; return; }
+  const pct = Math.round((ara - abans) / abans * 100);
+  const millor = menysEsMillor ? pct < 0 : pct > 0;
+  el.textContent = (pct > 0 ? '+' : '') + pct + '% vs setmana anterior';
+  el.className = 'd ' + (pct === 0 ? '' : millor ? 'ok' : 'bad');
+}
+
+async function carrega(){
+  try {
+    const [ses, res] = await Promise.all([
+      fetch(FIREBASE_URL + '/sessions.json').then(r => r.json()),
+      fetch(FIREBASE_URL + '/resums.json').then(r => r.json())
+    ]);
+    const partides = Object.values(ses || {})
+      .filter(p => p.exercici === 'laberint' && p.timestamp)
+      .sort((a,b) => a.timestamp - b.timestamp);
+
+    const ara = Date.now(), D = 86400000;
+    const a = estad(partides.filter(p => p.timestamp > ara - 7*D));
+    const b = estad(partides.filter(p => p.timestamp > ara - 14*D && p.timestamp <= ara - 7*D));
+    $('k-part').textContent = a.n;
+    $('k-temps').textContent = a.temps != null ? a.temps.toFixed(1) : '–';
+    $('k-millor').textContent = a.millor != null ? a.millor.toFixed(1) : '–';
+    $('k-caig').textContent = a.caig != null ? a.caig.toFixed(1) : '–';
+    delta($('d-part'), a.n, b.n, false);
+    delta($('d-temps'), a.temps, b.temps, true);
+    delta($('d-caig'), a.caig, b.caig, true);
+
+    const set = partides.filter(p => p.timestamp > ara - 7*D);
+    const diesActius = new Set(set.map(p => new Date(p.timestamp).toDateString())).size;
+    const rapides = set.filter(p => p.completat && p.temps_s <= OBJ_TEMPS).length;
+    objectiu('part', set.length, OBJ_PARTIDES, 'En falten ' + Math.max(0, OBJ_PARTIDES - set.length));
+    objectiu('dies', diesActius, OBJ_DIES, 'Millor una mica cada dia que molt un sol dia');
+    objectiu('temps', rapides, set.length || 1, 'Objectiu: arribar a la meta en menys de ' + OBJ_TEMPS + ' s');
+
+    const dies = [], compt = [];
+    for (let i = 13; i >= 0; i--) {
+      const d0 = new Date(ara - i*D); d0.setHours(0,0,0,0);
+      dies.push(dia(d0));
+      compt.push(partides.filter(p => p.timestamp >= +d0 && p.timestamp < +d0 + D).length);
+    }
+    new Chart($('g-dies'), {type:'bar', data:{labels:dies, datasets:[{data:compt, backgroundColor:compt.map(n => n ? ACC : '#3a2d22'), borderRadius:6}]},
+      options:{plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true, ticks:{precision:0}}}}});
+
+    const comp = partides.filter(p => p.completat);
+    new Chart($('g-temps'), {type:'line', data:{labels:comp.map(p => dia(p.timestamp)),
+      datasets:[{label:'Temps', data:comp.map(p => p.temps_s), borderColor:ACC, backgroundColor:ACC, tension:.3, pointRadius:3,
+                 pointBackgroundColor:comp.map(p => p.temps_s <= OBJ_TEMPS ? '#2ecc71' : ACC)},
+                liniaObjectiu(comp.length, OBJ_TEMPS)]},
+      options:{plugins:{legend:{display:true, labels:{boxWidth:12}}}, scales:{y:{beginAtZero:true}}}});
+
+    new Chart($('g-caig'), {type:'line', data:{labels:partides.map(p => dia(p.timestamp)),
+      datasets:[{label:'Caigudes', data:partides.map(p => p.caigudes), borderColor:'#e74c3c', backgroundColor:'#e74c3c', tension:.3, pointRadius:3},
+                liniaObjectiu(partides.length, OBJ_CAIGUDES)]},
+      options:{plugins:{legend:{display:true, labels:{boxWidth:12}}}, scales:{y:{beginAtZero:true, ticks:{precision:0}}}}});
+
+    const ult = partides.slice(-8).reverse();
+    $('taula').innerHTML = '<tr><th>Data</th><th>Temps</th><th>Caigudes</th><th>Meta</th></tr>' +
+      ult.map(p => `<tr><td>${new Date(p.timestamp).toLocaleString('ca-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
+        <td>${p.temps_s.toFixed(1)} s</td><td>${p.caigudes}</td>
+        <td class="${p.completat?'ok':'bad'}">${p.completat?'Sí':'No'}</td></tr>`).join('');
+
+    const resums = Object.values(res || {}).sort((x,y) => y.timestamp - x.timestamp);
+    if (resums.length) {
+      $('resum').textContent = resums[0].text;
+      $('resum-data').textContent = 'Generat el ' + new Date(resums[0].timestamp).toLocaleString('ca-ES');
+    }
+  } catch (e) {
+    $('resum').innerHTML = '<span class="err">No es poden llegir les dades. Revisa FIREBASE_URL al principi del fitxer.</span>';
+    console.error(e);
+  }
+}
+carrega();
+</script>
+</body>
+</html>

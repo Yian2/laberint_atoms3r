@@ -1,0 +1,5 @@
+laberint/secrets.h
+.env
+__pycache__/
+*.pyc
+sessions.csv
